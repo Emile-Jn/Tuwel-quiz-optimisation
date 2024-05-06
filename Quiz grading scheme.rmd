@@ -1,0 +1,396 @@
+---
+title: "Tuwel quiz score optimization"
+author: "Emile Johnston"
+output: pdf_document
+toc: true
+---
+
+TUWEL enables the creation of quizzes with a special score system: for a given
+batch of statements which must be marked as true or false, the score is 
+calculated as follows: each true statement which is marked as true by the student
+gives 1 point divided by the number of true statements in the batch, and each
+false statement which is marked as true takes off 1 point, divided by the number
+of false statements in the batch. Statements which are answered false don't 
+result in positive or negative points.
+
+Here we are interested in the particular case where there are four statements per
+batch, and there are five boxes to check: one for each statement, and one "none
+of the above" box to check in case none of the statements are true. This is not
+strictly necessary but is made so that it's impossible to get any points without
+checking any boxes, and is a convenient way to give points when there are no 
+true statements. It also introduces a bias in the scoring system: it artificially
+increases the number of false "statements", therefore decreasing the potential 
+penalty of guessing true compared to the potentially missed opportunity of 
+guessing false. We will see that this results in a statistical benefit in 
+guessing true in the majority of cases.
+
+# 1. Putting the quiz logic into functions
+
+## 1.1. Four statements, five boxes to check
+
+First, we need to clearly distinguish the four statements, which are answered, 
+and the five boxes, which are checked. Guessing is done on the statements, but
+the score is determined from the checks.
+This function takes the answers to the four questions, and returns the boxes that
+would be checked according to these answers:
+
+```{r}
+n_q <- 4 # number of questions per batch
+
+answers_to_checks <- function(answers) {
+  # if all booleans in x are FALSE:
+  if (!any(answers)) { 
+    # if none of the statements are true, the last box "none of the above" is 
+    # checked
+    return(c(answers, TRUE))
+  } # otherwise
+  return(c(answers, FALSE)) 
+  # if at least one of the statements is true, the last box is not checked
+}
+
+answers_to_checks(c(TRUE, FALSE, TRUE, FALSE))
+answers_to_checks(c(FALSE, FALSE, FALSE, FALSE))
+```
+
+
+## 1.2. Calculating the score of a single statement
+Next, a function that calculates the score contribution of a single question:
+
+```{r}
+question_score <- function(answer, correct_answer, n_true, n_false) {
+  if (answer & correct_answer) { # statement is true, answer is TRUE
+    return(1/n_true)
+  }
+  if (!answer) { # statement is true or false, answer is FALSE
+    return(0)
+  }
+  return(-1/n_false) # statement is false, answer is TRUE
+}
+
+# generate all combinations for a boolean of length 2:
+possibilities <- expand.grid(rep(list(c(TRUE, FALSE)), 2))
+
+cat("For a case where there are 2 true statements and 2 false statements: \n")
+for (i in 1:nrow(possibilities)) {
+  cat("student's answer: ", possibilities[i,1],
+      " correct answer: ", possibilities[i,2],
+      "score: ", question_score(possibilities[i,1], possibilities[i,2], 2, 3), "\n")
+}
+```
+
+
+## 1.3. Calculating the score of a batch of statements
+
+Next, a function that calculates the score based on the boxes checked, and the correct
+answers:
+
+```{r}
+score <- function(checks, correct_checks) {
+  # count number of TRUEs in correct_checks
+  num_true_statements <- sum(correct_checks)
+  num_false_statements <- length(correct_checks) - num_true_statements
+  scores <- numeric(length(checks))
+  for (i in 1:length(checks)) {
+    scores[i] <- question_score(checks[i], correct_checks[i], 
+                                num_true_statements, num_false_statements)
+  }
+  sum(scores)
+}
+
+# randomly generate a boolean vector of length 4:
+set.seed(1)
+cat("answers to statements: ", 
+    answers <- sample(c(TRUE, FALSE), n_q, replace = TRUE), "\n")
+cat("boxes checked: ", checks <- answers_to_checks(answers), "\n")
+cat("boxes that should be checked", 
+    correct_checks <- c(TRUE, FALSE, TRUE, FALSE, FALSE), "\n")
+cat("score: ", score(checks, correct_checks), "\n")
+```
+
+
+# 2. Expectancy of the score for completely random answers to all statements
+
+What score do you get by answering everything randomly?
+
+We can consider only the number of true or false statements in a batch without looking
+at the order of the statements, because the truth value of the statements doesn't depend
+on their order.
+
+## 2.1. Generating random answers
+
+First, generate all possible combinations of four booleans, where order does not matter:
+```{r}
+# create an empty boolean vector of lenght n_q:
+booleans <- rep(FALSE, n_q) # n_q is the number of questions per batch
+combinations <- rep(list(booleans), n_q+1)
+for (i in 1:n_q) {
+  combinations[[i+1]][1:i] <- TRUE
+}
+print(combinations)
+cat("number of combinations: ", length(combinations))
+```
+
+```{r}
+typeof(combinations[[1]])
+```
+
+
+## 2.2. Generating random statements
+
+Next, generate all possible random answers: combinations where order does matter:
+```{r}
+permutations <- expand.grid(rep(list(c(TRUE, FALSE)), n_q))
+permutations
+```
+
+```{r}
+cat("typeof(permutations[[1]]) : " , typeof(permutations[[1]]), "\n")
+cat("length(permutations) : ", length(permutations), "\n")
+cat("nrows(permutations) : ", nrow(permutations), "\n")
+cat(as.logical(permutations[1,]))
+```
+
+## 2.3. Calculating the score for all possible combinations of statements
+
+for n questions, there are 2^n possible answers. Let's calculate the score for all of them:
+```{r}
+# This code chunk prints 330 lines. To make the pdf more readable the number of
+# printed lines can be limited with a variable.
+max_lines <- 40 # change this value to print more lines
+end <- FALSE # to signal that the printed output ends
+col_names <- c("0T 4F", "1T 3F", "2T 2F", "3T 1F", "4T 0F")
+scores <- matrix(NA,
+                 nrow=nrow(permutations),
+                 ncol=length(combinations),
+                 dimnames=list(NULL, col_names))
+for (i in 1:length(combinations)) { # for each combination of true statements
+  if (!end) {
+    cat("\n if the correct answers are: ", combinations[[i]], "\n\n")
+  }
+  for (j in 1:nrow(permutations)) { # for each random answer
+    s_answers <- as.logical(permutations[j,])
+    s_checks <- answers_to_checks(s_answers)
+    t_checks <- answers_to_checks(combinations[[i]])
+    s <- score(s_checks, t_checks)
+    scores[j,i] <- s
+    if (max_lines > 0) {
+      cat("student's answers: ", s_answers, "\n")
+      cat("student checks these boxes: ", s_checks, "\n")
+      # cat("correct answers: ", combinations[[i]], "\n")
+      cat("boxes that should be checked: ", t_checks, "\n") # true checks
+      cat("score: ", s, "\n")
+      max_lines <- max_lines - 4
+    }
+    else {
+      if (!end) {
+        cat("\n Output is cut off here for readability. To print the full output, 
+             change the max_lines variable to 350.")
+        end <- TRUE
+      }
+    }
+  }
+}
+```
+
+Overall, the scores look like this:
+```{r}
+scores
+```
+
+Looking at the average per category:
+
+```{r}
+average_scores <- colMeans(scores)
+average_scores
+```
+
+## 2.4. The score for a batch can't be negative
+
+Now, we need to take into account the fact that a score for a batch of four statements
+can't be negative. So we take the maximum of 0 and x for each score x:
+
+```{r}
+pos_scores <- pmax(scores, 0) # positive scores
+pos_scores
+```
+
+
+## 2.5. Scores by random answers
+
+Now let's calculate the average score to see the expectancy.
+Per column:
+```{r}
+expectancy_per_trues <- colMeans(pos_scores)
+expectancy_per_trues
+```
+
+
+## 2.6. Taking into account probabilities
+
+Earlier we ignored the order of the statements, but we do need to take into account
+the probability of each combination of true and false statements.
+```{r}
+probs <- choose(n_q,0:n_q) # probabilities of each combination of true and false statements
+cat("probs: ", probs, "\n")
+# normalise the probabilities:
+probs <- probs/sum(probs)
+cat("normalised probs: ", probs, "\n")
+```
+
+## 2.7. Overall expectancy
+
+Now we can calculate the overall expectancy of answering randomly:
+```{r}
+overall_expectancy <- sum(expectancy_per_trues * probs)
+overall_expectancy
+```
+
+# 3. Calculating all possible scenarios
+
+## 3.1. Function for guessing the answers
+
+This function takes answers to some of the four statements as input, and outputs 
+the expectancy of the score for each possible guess for the remaining unanswered 
+statements.  
+For each case and for each possible guess, all possibilities for the remaining
+uncertain statements are printed, along with the resulting score based on the
+guess.  
+For example if you know that one statement is false, and you guess TRUE FALSE
+FALSE, and the outcome (actual truth value of the remaining statements) is TRUE
+TRUE TRUE, the score for the batch is 0.33  
+```{r}
+guess <- function(n_true, n_false) {
+  # Deal with irrelevant input:
+  if (n_true < 0 | n_true > n_q | n_false < 0 | n_false > n_q) {
+    stop("The number of true and false statements must be between 0 and", n_q)
+  }
+  if (n_true + n_false > n_q) {
+    stop("There are only four statements per batch, so the number of true statements +
+    false statements can't be more than", n_q)
+  }
+  if (n_true + n_false == n_q) {
+    cat('You have already answered all four statements in this batch.')
+    return(NULL)
+  }
+
+  # Explain the context:
+  cat('You already know that', n_true, 'statements are true and', n_false,
+  'statements are false. \n You have' , n_uncertain <- n_q - n_true - n_false,
+      'statements left to answer, and there are', n_uncertain+1,
+      "ways to guess them. \n\n")
+
+  # Simulate all possible guesses:
+  scores <- list()
+  n_guesses <- n_q - n_true - n_false # number of remaining unanswered statements
+  booleans <- rep(FALSE, n_guesses) # placeholders for the guesses
+  guesses <- rep(list(booleans), n_guesses+1)
+    for (i in 1:n_guesses) {
+      guesses[[i+1]][1:i] <- TRUE
+  }
+  certain_answers <- c(rep(TRUE, n_true), rep(FALSE, n_false))
+  permutations <- expand.grid(rep(list(c(TRUE, FALSE)), n_guesses)) # all possible cases
+  for (guess in guesses) { # For each possible guess
+    cat("if you guess", guess, ", these are the outcomes:", "\n")
+    answers <- c(certain_answers, guess)
+    checks <- answers_to_checks(answers)
+    if (!length(answers) == n_q) { # check if there are 4 answers
+        cat('answers: ', answers, '\n')
+        stop("The length of the answers vector is not equal to the number of questions per
+         batch.")
+    }
+    guess_scores <- numeric(nrow(permutations))
+    for (j in 1:nrow(permutations)) { # for each possible combination of correct answers
+      correct_answers <- c(certain_answers, as.logical(permutations[j,]))
+      if (!length(correct_answers) == n_q) { # check if there are 4 answers
+        cat('correct answers: ', correct_answers, '\n')
+        stop("The length of the correct answers vector is not equal to the number of questions per
+         batch.")
+      }
+      correct_checks <- answers_to_checks(correct_answers)
+      score <- pmax(score(checks, correct_checks), 0) # score for the batch must be positive
+      cat(as.logical(permutations[j,]),":", score, ", ")
+      guess_scores[j] <- score
+    }
+    scores <- append(scores, list(guess_scores))
+    cat("\n average: ", mean(guess_scores), "\n\n")
+  }
+  scores
+}
+```
+
+## 3.2. Cases one by one
+
+### 3.2.1. 0 true, 0 false statements
+```{r}
+scores0T0F <- guess(0,0)
+```
+
+
+### 3.2.2. 0 true, 1 false statement
+```{r}
+scores0T1F <- guess(0,1)
+```
+
+### 3.2.3. 0 true, 2 false statements
+```{r}
+scores0T2F <- guess(0,2)
+```
+
+### 3.2.4. 0 true, 3 false statements
+```{r}
+scores0T3F <- guess(0,3)
+```
+
+### 3.2.5. 1 true, 0 false statements
+```{r}
+scores1T0F <- guess(1,0)
+```
+
+### 3.2.6. 1 true, 1 false statement
+```{r}
+scores1T1F <- guess(1,1)
+```
+
+### 3.2.7. 1 true, 2 false statements
+```{r}
+scores1T2F <- guess(1,2)
+```
+
+### 3.2.8. 2 true, 0 false statements
+```{r}
+scores2T0F <- guess(2,0)
+```
+
+### 3.2.9. 2 true, 1 false statement
+```{r}
+scores2T1F <- guess(2,1)
+```
+
+### 3.2.10. 3 true, 0 false statements
+```{r}
+scores3T0F <- guess(3,0)
+```
+
+## 3.3. Final results
+Based on the outputs in the previous section:  
+- if you know that one statement is true, and you don't know about the 3 others, you will
+get the highest score expectancy by guessing 1 or 2 remaining statements to be true.  
+- if you know that at least 2 statements are true, you will get the highest score
+expectancy by guessing all remaining statements to be false.  
+- in all other cases, you will get the highest score expectancy by guessing all remaining
+statements to be true.  
+  
+Summary table:
+```{r}
+# make table with knitr kable:
+pacman::p_load(knitr)
+table <- data.frame(
+  "What_you_already_answered" = c("0 T, 0 F", "0 T, 1 F", "0 T, 2 F",
+                                   "0 T, 3 F", "1 T, 0 F", "1 T, 1 F",
+                                   "1 T, 2 F", "2 T, 0 F", "2 T, 1 F",
+                                   "3 T, 0 F"),
+    "Best_guess" = c("TTTT", "TTT", "TT", "T or F", "TTF or TFF", "TT", "T", "FF",
+                     "T or F", "F")
+)
+kable(table, format = "markdown", caption = "summary table")
+```
