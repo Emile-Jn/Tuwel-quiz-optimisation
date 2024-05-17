@@ -13,7 +13,9 @@ false statement which is marked as true takes off 1 point, divided by the number
 of false statements in the batch. Statements which are answered false don't 
 result in positive or negative points.
 
-Here we are interested in the particular case where there are four statements per
+# 1 with a "none of the above" box
+
+In this first part, we are interested in the particular case where there are four statements per
 batch, and there are five boxes to check: one for each statement, and one "none
 of the above" box to check in case none of the statements are true. This is not
 strictly necessary but is made so that it's impossible to get any points without
@@ -24,9 +26,9 @@ penalty of guessing true compared to the potentially missed opportunity of
 guessing false. We will see that this results in a statistical benefit in 
 guessing true in the majority of cases.
 
-# 1. Putting the quiz logic into functions
+## 1.1. Putting the quiz logic into functions
 
-## 1.1. Four statements, five boxes to check
+### 1.1.1. Four statements, five boxes to check
 
 First, we need to clearly distinguish the four statements, which are answered, 
 and the five boxes, which are checked. Guessing is done on the statements, but
@@ -53,7 +55,7 @@ answers_to_checks(c(FALSE, FALSE, FALSE, FALSE))
 ```
 
 
-## 1.2. Calculating the score of a single statement
+### 1.1.2. Calculating the score of a single statement
 Next, a function that calculates the score contribution of a single question:
 
 ```{r}
@@ -79,7 +81,7 @@ for (i in 1:nrow(possibilities)) {
 ```
 
 
-## 1.3. Calculating the score of a batch of statements
+### 1.1.3. Calculating the score of a batch of statements
 
 Next, a function that calculates the score based on the boxes checked, and the correct
 answers:
@@ -108,7 +110,7 @@ cat("score: ", score(checks, correct_checks), "\n")
 ```
 
 
-# 2. Expectancy of the score for completely random answers to all statements
+## 1.2. Expectancy of the score for completely random answers to all statements
 
 What score do you get by answering everything randomly?
 
@@ -116,7 +118,7 @@ We can consider only the number of true or false statements in a batch without l
 at the order of the statements, because the truth value of the statements doesn't depend
 on their order.
 
-## 2.1. Generating random answers
+### 1.2.1. Generating random answers
 
 First, generate all possible combinations of four booleans, where order does not matter:
 ```{r}
@@ -135,7 +137,7 @@ typeof(combinations[[1]])
 ```
 
 
-## 2.2. Generating random statements
+### 1.2.2. Generating random statements
 
 Next, generate all possible random answers: combinations where order does matter:
 ```{r}
@@ -150,7 +152,7 @@ cat("nrows(permutations) : ", nrow(permutations), "\n")
 cat(as.logical(permutations[1,]))
 ```
 
-## 2.3. Calculating the score for all possible combinations of statements
+### 1.2.3. Calculating the score for all possible combinations of statements
 
 for n questions, there are 2^n possible answers. Let's calculate the score for all of them:
 ```{r}
@@ -204,7 +206,7 @@ average_scores <- colMeans(scores)
 average_scores
 ```
 
-## 2.4. The score for a batch can't be negative
+### 1.2.4. The score for a batch can't be negative
 
 Now, we need to take into account the fact that a score for a batch of four statements
 can't be negative. So we take the maximum of 0 and x for each score x:
@@ -215,7 +217,7 @@ pos_scores
 ```
 
 
-## 2.5. Scores by random answers
+### 1.2.5. Scores by random answers
 
 Now let's calculate the average score to see the expectancy.
 Per column:
@@ -225,7 +227,7 @@ expectancy_per_trues
 ```
 
 
-## 2.6. Taking into account probabilities
+### 1.2.6. Taking into account probabilities
 
 Earlier we ignored the order of the statements, but we do need to take into account
 the probability of each combination of true and false statements.
@@ -237,7 +239,7 @@ probs <- probs/sum(probs)
 cat("normalised probs: ", probs, "\n")
 ```
 
-## 2.7. Overall expectancy
+### 1.2.7. Overall expectancy
 
 Now we can calculate the overall expectancy of answering randomly:
 ```{r}
@@ -245,9 +247,9 @@ overall_expectancy <- sum(expectancy_per_trues * probs)
 overall_expectancy
 ```
 
-# 3. Calculating all possible scenarios
+## 1.3. Calculating all possible scenarios
 
-## 3.1. Function for guessing the answers
+### 1.3.1. Function for guessing the answers
 
 This function takes answers to some of the four statements as input, and outputs 
 the expectancy of the score for each possible guess for the remaining unanswered 
@@ -259,7 +261,12 @@ For example if you know that one statement is false, and you guess TRUE FALSE
 FALSE, and the outcome (actual truth value of the remaining statements) is TRUE
 TRUE TRUE, the score for the batch is 0.33  
 ```{r}
-guess <- function(n_true, n_false) {
+guess <- function(params, nota_box=TRUE) {
+  n_true <- params[1]
+  n_false <- params[2]
+  # n_true: number of statements in the batch which are already known to be true
+  # n_false: number of statements in the batch which are already known to be false
+  # nota_box: none of the above box, if it's added to the batch or not
   # Deal with irrelevant input:
   if (n_true < 0 | n_true > n_q | n_false < 0 | n_false > n_q) {
     stop("The number of true and false statements must be between 0 and", n_q)
@@ -282,6 +289,7 @@ guess <- function(n_true, n_false) {
   # Simulate all possible guesses:
   scores <- list()
   n_guesses <- n_q - n_true - n_false # number of remaining unanswered statements
+  averages <- numeric() # the average score for each guess
   booleans <- rep(FALSE, n_guesses) # placeholders for the guesses
   guesses <- rep(list(booleans), n_guesses+1)
     for (i in 1:n_guesses) {
@@ -292,7 +300,9 @@ guess <- function(n_true, n_false) {
   for (guess in guesses) { # For each possible guess
     cat("if you guess", guess, ", these are the outcomes:", "\n")
     answers <- c(certain_answers, guess)
-    checks <- answers_to_checks(answers)
+    if (nota_box) {
+      checks <- answers_to_checks(answers)
+    }
     if (!length(answers) == n_q) { # check if there are 4 answers
         cat('answers: ', answers, '\n')
         stop("The length of the answers vector is not equal to the number of questions per
@@ -306,72 +316,83 @@ guess <- function(n_true, n_false) {
         stop("The length of the correct answers vector is not equal to the number of questions per
          batch.")
       }
-      correct_checks <- answers_to_checks(correct_answers)
-      score <- pmax(score(checks, correct_checks), 0) # score for the batch must be positive
+      if (nota_box) {
+        correct_checks <- answers_to_checks(correct_answers)
+        score <- pmax(score(checks, correct_checks), 0) # score for the batch must be positive
+      } else {
+        score <- pmax(score(answers, correct_answers), 0)
+      }
       cat(as.logical(permutations[j,]),":", score, ", ")
       guess_scores[j] <- score
     }
     scores <- append(scores, list(guess_scores))
-    cat("\n average: ", mean(guess_scores), "\n\n")
+    cat("\n average: ", average <- mean(guess_scores), "\n\n")
+    averages <- c(averages, average)
   }
-  scores
+  return (list(scores, guesses, averages))
 }
 ```
 
-## 3.2. Cases one by one
+### 1.3.2. Cases one by one
 
-### 3.2.1. 0 true, 0 false statements
 ```{r}
-scores0T0F <- guess(0,0)
+cases <- matrix(c(0,0,  0,1,  0,2,  0,3,  1,0,  1,1,  1,2,  2,0,  2,1,  3,0),
+                ncol=2, byrow=TRUE)
+outcomes <- vector("list", nrow(cases))
+```
+
+#### 1.3.2.1. 0 true, 0 false statements
+```{r}
+outcomes[[1]] <- guess(cases[1,])
 ```
 
 
-### 3.2.2. 0 true, 1 false statement
+#### 1.3.2.2. 0 true, 1 false statement
 ```{r}
-scores0T1F <- guess(0,1)
+outcomes[[2]] <- guess(cases[2,])
 ```
 
-### 3.2.3. 0 true, 2 false statements
+#### 1.3.2.3. 0 true, 2 false statements
 ```{r}
-scores0T2F <- guess(0,2)
+outcomes[[3]] <- guess(cases[3,])
 ```
 
-### 3.2.4. 0 true, 3 false statements
+#### 1.3.2.4. 0 true, 3 false statements
 ```{r}
-scores0T3F <- guess(0,3)
+outcomes[[4]] <- guess(cases[4,])
 ```
 
-### 3.2.5. 1 true, 0 false statements
+#### 1.3.2.5. 1 true, 0 false statements
 ```{r}
-scores1T0F <- guess(1,0)
+outcomes[[5]] <- guess(cases[5,])
 ```
 
-### 3.2.6. 1 true, 1 false statement
+#### 1.3.2.6. 1 true, 1 false statement
 ```{r}
-scores1T1F <- guess(1,1)
+outcomes[[6]] <- guess(cases[6,])
 ```
 
-### 3.2.7. 1 true, 2 false statements
+#### 1.3.2.7. 1 true, 2 false statements
 ```{r}
-scores1T2F <- guess(1,2)
+outcomes[[7]] <- guess(cases[7,])
 ```
 
-### 3.2.8. 2 true, 0 false statements
+#### 1.3.2.8. 2 true, 0 false statements
 ```{r}
-scores2T0F <- guess(2,0)
+outcomes[[8]] <- guess(cases[8,])
 ```
 
-### 3.2.9. 2 true, 1 false statement
+#### 1.3.2.9. 2 true, 1 false statement
 ```{r}
-scores2T1F <- guess(2,1)
+outcomes[[9]] <- guess(cases[9,])
 ```
 
-### 3.2.10. 3 true, 0 false statements
+#### 1.3.2.10. 3 true, 0 false statements
 ```{r}
-scores3T0F <- guess(3,0)
+outcomes[[10]] <- guess(cases[10,])
 ```
 
-## 3.3. Final results
+### 1.3.3. Final results
 Based on the outputs in the previous section:  
 - if you know that one statement is true, and you don't know about the 3 others, you will
 get the highest score expectancy by guessing 1 or 2 remaining statements to be true.  
@@ -394,3 +415,125 @@ table <- data.frame(
 )
 kable(table, format = "markdown", caption = "summary table")
 ```
+
+# 2 without a "none of the above" box
+
+Now we look at the case where there are still four statements to answer, but there is no
+"none of the above" box.
+
+## 2.1. Cases one by one
+
+```{r}
+outcomes_ <- vector("list", nrow(cases))
+```
+
+### 2.1.1. 0 true, 0 false statements
+```{r}
+outcomes_[[1]] <- guess(cases[1,], nota_box=FALSE)
+```
+
+
+### 2.1.2. 0 true, 1 false statement
+```{r}
+outcomes_[[2]] <- guess(cases[2,], nota_box=FALSE)
+```
+
+### 2.1.3. 0 true, 2 false statements
+```{r}
+outcomes_[[3]] <- guess(cases[3,], nota_box=FALSE)
+```
+
+### 2.1.4. 0 true, 3 false statements
+```{r}
+outcomes_[[4]] <- guess(cases[4,], nota_box=FALSE)
+```
+
+### 2.1.5. 1 true, 0 false statements
+```{r}
+outcomes_[[5]] <- guess(cases[5,], nota_box=FALSE)
+```
+
+### 2.1.6. 1 true, 1 false statement
+```{r}
+outcomes_[[6]] <- guess(cases[6,], nota_box=FALSE)
+```
+
+### 2.1.7. 1 true, 2 false statements
+```{r}
+outcomes_[[7]] <- guess(cases[7,], nota_box=FALSE)
+```
+
+### 2.1.8. 2 true, 0 false statements
+```{r}
+outcomes_[[8]] <- guess(cases[8,], nota_box=FALSE)
+```
+
+### 2.1.9. 2 true, 1 false statement
+```{r}
+outcomes_[[9]] <- guess(cases[9,], nota_box=FALSE)
+```
+
+### 2.1.10. 3 true, 0 false statements
+```{r}
+outcomes_[[10]] <- guess(cases[10,], nota_box=FALSE)
+```
+
+## 2.2 Conclusions
+
+Let's compare the case where each batch of statements has a "none of the above"
+box ("with_nota") and the case where it doesn't ("without_nota").
+To keep only the most important information, we can make a function that 
+extracts the best guess and score expectancy for each case:
+```{r}
+guess_to_string <- function(logical_vector) {
+  char_vector <- ifelse(logical_vector, "T", "F")
+  paste0(char_vector, collapse = "")
+}
+
+summarise <- function(cases, outcomes) {
+  result <- data.frame("Known_answers" = rep(NA, length(outcomes)),
+                       "Best_guess" = rep(NA, length(outcomes)),
+                       "Score_expectancy" = rep(NA, length(outcomes)))
+  result[,1] <- apply(cases, 1,
+                      function(row) paste0(row[1], " T, ", row[2], " F"))
+  for (i in 1:length(outcomes)) {
+    idx <- which.max(outcomes[[i]][[3]]) # highest of averages
+    result[i,2] <- guess_to_string(outcomes[[i]][[2]][[idx]])
+    result[i,3] <- outcomes[[i]][[3]][idx]
+  }
+  return(result)
+}
+```
+
+Collecting information for with_nota and without_nota respectively:
+```{r}
+summary <- summarise(cases, outcomes)
+summary_ <- summarise(cases, outcomes_)
+```
+
+Comparing the two side by side:
+```{r}
+pacman::p_load(dplyr)
+comparison <- summary %>% inner_join(summary_, by="Known_answers")
+colnames(comparison) <- c("Known_answers", 
+                          "Best_guess_with_nota", 
+                          "Score_expectancy_with_nota",
+                          "Best_guess_without_nota",
+                          "Score_expectancy_without_nota")
+
+comparison %>% select(Known_answers, 
+                      Best_guess_with_nota, 
+                      Best_guess_without_nota,
+                      Score_expectancy_with_nota,
+                      Score_expectancy_without_nota)
+```
+
+We can see that in 4 cases, the score expectancy is the same, and in the 
+remaining 6 cases the score expectancy is higher when there is a NOTA box.  
+This means that making a Tuwel quiz with NOTA boxes is inherently more favorable
+to students (assuming that not everyone knows the answer to every statement).
+Removing the NOTA box also changes the best guess in some cases: it is no longer
+so biased towards guessing true.  
+Overall, without the NOTA box, the best guess mostly consists in balancing out 
+the true and false statements: when most known answers are true, it's best to 
+guess false, and vice-versa.
